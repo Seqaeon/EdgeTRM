@@ -11,6 +11,20 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Sequence, Tuple
 
 import torch
+import inspect
+
+# --- Hotfix for PyTorch optimizer version mismatch error ---
+if hasattr(torch, '_dynamo') and hasattr(torch._dynamo, 'disable'):
+    _disable_sig = inspect.signature(torch._dynamo.disable)
+    if 'wrapping' not in _disable_sig.parameters:
+        _orig_disable = torch._dynamo.disable
+        def _patched_disable(*args, **kwargs):
+            kwargs.pop('wrapping', None)
+            return _orig_disable(*args, **kwargs)
+        torch._dynamo.disable = _patched_disable
+        if hasattr(torch, '_compile') and hasattr(torch._compile, 'disable'):
+            torch._compile.disable = _patched_disable
+# ---------------------------------------------------------
 
 from models.losses import ACTLossHead
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
