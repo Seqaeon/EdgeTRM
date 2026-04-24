@@ -16,6 +16,11 @@ import torch
 from models.losses import ACTLossHead
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 
+
+
+import inspect
+
+
 # --- Hotfix for PyTorch optimizer version mismatch error ---
 if hasattr(torch, '_dynamo') and hasattr(torch._dynamo, 'disable'):
     _disable_sig = inspect.signature(torch._dynamo.disable)
