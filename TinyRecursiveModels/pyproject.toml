@@ -9,7 +9,7 @@ description = "Tiny Recursive Models"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "torch==2.7.0+cu126",
+    "torch==2.7.0",
     "adam-atan2==0.0.3",
     "einops==0.8.1",
     "tqdm==4.67.1",
@@ -37,3 +37,7 @@ torch = { index = "pytorch" }
 name = "pytorch"
 url = "https://download.pytorch.org/whl/cu126"
 explicit = true
+
+[tool.setuptools]
+packages = ["config", "dataset", "evaluators", "models", "utils"]
+py-modules = ["edge_trm_wrapper", "pretrain", "puzzle_dataset"]
