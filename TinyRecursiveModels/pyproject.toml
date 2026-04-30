@@ -31,6 +31,13 @@ dependencies = [
     "triton==3.3.0"
 ]
 
+[project.optional-dependencies]
+edge = [
+    "bitsandbytes>=0.43.0",
+    "onnx>=1.16.0",
+    "onnxruntime>=1.18.0",
+]
+
 [tool.uv.sources]
 torch = { index = "pytorch" }
 
@@ -42,3 +49,7 @@ explicit = true
 [tool.setuptools]
 packages = ["config", "dataset", "evaluators", "models", "utils"]
 py-modules = ["edge_trm_wrapper", "pretrain", "puzzle_dataset"]
+
+# Install edge-deployment extras:
+#   pip install .[edge]
+#   uv pip install .[edge]
