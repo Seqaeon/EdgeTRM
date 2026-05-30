@@ -263,11 +263,17 @@ def load_checkpoint(model: nn.Module, config: PretrainConfig):
         if puzzle_emb_name in state_dict:
             puzzle_emb = state_dict[puzzle_emb_name]
             if puzzle_emb.shape != expected_shape:
-                print(f"Resetting puzzle embedding as shape is different. Found {puzzle_emb.shape}, Expected {expected_shape}")
-                # Re-initialize using mean
-                state_dict[puzzle_emb_name] = (
-                    torch.mean(puzzle_emb, dim=0, keepdim=True).expand(expected_shape).contiguous()
-                )
+                print(f"Resizing puzzle embedding. Found {puzzle_emb.shape}, Expected {expected_shape}")
+                # Create new tensor with expected shape, initialized to mean
+                new_weights = torch.empty(expected_shape, dtype=puzzle_emb.dtype, device=puzzle_emb.device)
+                mean_emb = torch.mean(puzzle_emb, dim=0)
+                new_weights[:] = mean_emb
+                
+                # Copy all overlapping rows to preserve learned weights
+                min_rows = min(puzzle_emb.shape[0], expected_shape[0])
+                new_weights[:min_rows] = puzzle_emb[:min_rows]
+                state_dict[puzzle_emb_name] = new_weights
+                
         model.load_state_dict(state_dict, assign=True)
 
 
