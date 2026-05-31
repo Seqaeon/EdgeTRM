@@ -242,7 +242,7 @@ def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches
     batch_size = loader.batch_size if hasattr(loader, "batch_size") else 512
     num_batches = (num_samples + batch_size - 1) // batch_size
     
-    pbar = tqdm(range(num_batches), desc="Evaluating per-puzzle batches", leave=False)
+    pbar = tqdm(range(num_batches), desc="Evaluating per-puzzle batches", leave=True)
     for batch_idx in pbar:
         if max_batches is not None and batch_idx >= max_batches:
             break
@@ -316,7 +316,7 @@ def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches
             local_preds[orig_name][input_hash].append((pred_hash, q_val))
 
         # Update progress bar set_postfix once every 10 batches to prevent CPU-based metric calculation bottleneck
-        if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == len(loader):
+        if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == num_batches:
             run_evaluated = [name for name in test_puzzles.keys() if name in local_preds]
             if len(run_evaluated) > 0:
                 run_correct = [0.0, 0.0]
@@ -364,6 +364,9 @@ def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches
                 run_p1 = run_correct[0] / len(run_evaluated)
                 run_cell = run_cell_hits / run_n_cells if run_n_cells > 0 else 0.0
                 pbar.set_postfix({"p1": f"{run_p1*100:.2f}%", "cell": f"{run_cell*100:.2f}%"})
+                
+                # Print directly to stdout every 10 batches so it is permanently logged in non-interactive/Modal logs
+                print(f" -> Batch {batch_idx + 1}/{num_batches} | Running Pass@1: {run_p1*100:.4f}% | Running Cell Acc: {run_cell*100:.4f}%", flush=True)
 
     elapsed = time.time() - t0
 
@@ -452,7 +455,7 @@ def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches
 # 5. Run evaluation
 print("Running FP32 baseline evaluation...")
 # Configure DataLoader with highly optimized batch size for GPU
-BATCH_SIZE = 512
+BATCH_SIZE = 2048
 test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False)
 
 p1, p2, cell, ms, npuzz = evaluate_arc_per_puzzle(
