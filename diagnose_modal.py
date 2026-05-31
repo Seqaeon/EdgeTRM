@@ -183,6 +183,14 @@ def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches
             aug_cache[pid] = inverse_aug(name)
         return aug_cache[pid]
 
+    # High-performance caching of _crop to eliminate Numba overhead on repetitive sequences
+    crop_cache = {}
+    def get_crop(seq):
+        seq_bytes = seq.tobytes()
+        if seq_bytes not in crop_cache:
+            crop_cache[seq_bytes] = _crop(seq)
+        return crop_cache[seq_bytes]
+
     # Precompute canonical input hashes
     precomputed_input_info = {}
     ds = loader.dataset
@@ -284,11 +292,11 @@ def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches
                 input_hash = precomputed_input_info[sample_idx][1]
             else:
                 inp_seq = inputs_cpu[i]
-                input_grid = _inverse_fn(_crop(inp_seq))
+                input_grid = _inverse_fn(get_crop(inp_seq))
                 input_hash = grid_hash(input_grid)
 
             # Crop and inverse transform prediction
-            pred_grid = _inverse_fn(_crop(pred_seq))
+            pred_grid = _inverse_fn(get_crop(pred_seq))
             pred_hash = grid_hash(pred_grid)
 
             local_hmap[pred_hash] = pred_grid
@@ -296,6 +304,56 @@ def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches
             local_preds.setdefault(orig_name, {})
             local_preds[orig_name].setdefault(input_hash, [])
             local_preds[orig_name][input_hash].append((pred_hash, q_val))
+
+        # Update progress bar set_postfix once every 10 batches to prevent CPU-based metric calculation bottleneck
+        if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == len(loader):
+            run_evaluated = [name for name in test_puzzles.keys() if name in local_preds]
+            if len(run_evaluated) > 0:
+                run_correct = [0.0, 0.0]
+                run_cell_hits = 0
+                run_n_cells = 0
+                for name in run_evaluated:
+                    puzzle = test_puzzles[name]
+                    num_correct = [0, 0]
+                    for pair in puzzle["test"]:
+                        inp_grid = arc_grid_to_np(pair["input"])
+                        out_grid = arc_grid_to_np(pair["output"])
+                        input_hash = grid_hash(inp_grid)
+                        label_hash = grid_hash(out_grid)
+
+                        p_map = {}
+                        for h, q in local_preds[name].get(input_hash, []):
+                            p_map.setdefault(h, [0, 0.0])
+                            p_map[h][0] += 1
+                            p_map[h][1] += q
+
+                        if not len(p_map):
+                            run_n_cells += out_grid.size
+                            continue
+
+                        for h, stats in p_map.items():
+                            stats[1] /= stats[0]
+
+                        p_map_sorted = sorted(p_map.items(), key=lambda kv: kv[1], reverse=True)
+
+                        for i, k in enumerate([1, 2]):
+                            ok = False
+                            for h, stats in p_map_sorted[:k]:
+                                ok |= (h == label_hash)
+                            num_correct[i] += int(ok)
+
+                        top_hash = p_map_sorted[0][0]
+                        top_grid = local_hmap[top_hash]
+                        if top_grid.shape == out_grid.shape:
+                            run_cell_hits += (top_grid == out_grid).sum()
+                        run_n_cells += out_grid.size
+
+                    for i in range(2):
+                        run_correct[i] += num_correct[i] / len(puzzle["test"])
+
+                run_p1 = run_correct[0] / len(run_evaluated)
+                run_cell = run_cell_hits / run_n_cells if run_n_cells > 0 else 0.0
+                pbar.set_postfix({"p1": f"{run_p1*100:.2f}%", "cell": f"{run_cell*100:.2f}%"})
 
     elapsed = time.time() - t0
 
