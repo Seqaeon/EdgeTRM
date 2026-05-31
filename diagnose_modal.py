@@ -103,7 +103,7 @@ def load_arc_model(checkpoint_path, config_text):
             clean_state_dict[puzzle_emb_name] = new_weights
             
     model.load_state_dict(clean_state_dict)
-    model.model = model
+    model.__dict__['model'] = model
     model.eval()
     print("Model loaded successfully!")
     return model
