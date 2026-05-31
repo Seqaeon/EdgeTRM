@@ -161,7 +161,7 @@ from evaluators.arc import _crop
 import json
 
 @torch.no_grad()
-def evaluate_arc_per_puzzle(mdl, dataset, device="cpu", n_sup_max=16, max_puzzles=None, return_pass2=False):
+def evaluate_arc_per_puzzle(mdl, dataset, device="cpu", n_sup_max=16, max_puzzles=None, return_pass2=False, puzzles_per_batch=4):
     inner = get_inner(mdl)
     inner.eval()
     inner = inner.to(device)
@@ -200,21 +200,48 @@ def evaluate_arc_per_puzzle(mdl, dataset, device="cpu", n_sup_max=16, max_puzzle
     t0 = time.time()
 
     from tqdm import tqdm
-    pbar = tqdm(range(n_puzzles), desc="Evaluating puzzles")
-    for j in pbar:
-        start_idx = int(dataset.puzzle_ptr[j])
-        end_idx = int(dataset.puzzle_ptr[j+1])
-        if start_idx == end_idx:
+    # Process in chunks of puzzles_per_batch
+    pbar = tqdm(range(0, n_puzzles, puzzles_per_batch), desc="Evaluating puzzles")
+    for start_p_idx in pbar:
+        end_p_idx = min(start_p_idx + puzzles_per_batch, n_puzzles)
+        
+        # 1. Collate samples from all puzzles in the current chunk
+        inputs_list = []
+        labels_list = []
+        pids_list = []
+        puzzle_slices = []  # List of tuples: (orig_name, _inverse_fn, slice_in_collated_batch)
+        
+        current_offset = 0
+        for j in range(start_p_idx, end_p_idx):
+            start_idx = int(dataset.puzzle_ptr[j])
+            end_idx = int(dataset.puzzle_ptr[j+1])
+            if start_idx == end_idx:
+                continue
+
+            first_pid = int(dataset.per_sample_pids[start_idx])
+            orig_name, _inverse_fn = get_aug(first_pid)
+            if orig_name not in test_puzzles:
+                continue
+
+            num_samples = end_idx - start_idx
+            inputs_list.append(dataset.inputs[start_idx:end_idx])
+            labels_list.append(dataset.labels[start_idx:end_idx])
+            pids_list.append(dataset.per_sample_pids[start_idx:end_idx])
+            
+            puzzle_slices.append((
+                orig_name, 
+                _inverse_fn, 
+                slice(current_offset, current_offset + num_samples)
+            ))
+            current_offset += num_samples
+
+        if not inputs_list:
             continue
 
-        first_pid = int(dataset.per_sample_pids[start_idx])
-        orig_name, _inverse_fn = get_aug(first_pid)
-        if orig_name not in test_puzzles:
-            continue
-
-        x_puzzle = torch.tensor(dataset.inputs[start_idx:end_idx], dtype=torch.long, device=device)
-        y_puzzle = torch.tensor(dataset.labels[start_idx:end_idx], dtype=torch.long, device=device)
-        pids_puzzle = torch.tensor(dataset.per_sample_pids[start_idx:end_idx], dtype=torch.long, device=device)
+        # Concatenate into unified tensors
+        x_puzzle = torch.tensor(np.concatenate(inputs_list, axis=0), dtype=torch.long, device=device)
+        y_puzzle = torch.tensor(np.concatenate(labels_list, axis=0), dtype=torch.long, device=device)
+        pids_puzzle = torch.tensor(np.concatenate(pids_list, axis=0), dtype=torch.long, device=device)
 
         batch = {
             "inputs": x_puzzle.to(torch.int32),
@@ -222,6 +249,7 @@ def evaluate_arc_per_puzzle(mdl, dataset, device="cpu", n_sup_max=16, max_puzzle
             "puzzle_identifiers": pids_puzzle.to(torch.int32),
         }
 
+        # Run forward pass
         carry = inner.initial_carry(batch)
         ic = carry.inner_carry
         cast = lambda t: t.to(device)
@@ -243,74 +271,80 @@ def evaluate_arc_per_puzzle(mdl, dataset, device="cpu", n_sup_max=16, max_puzzle
         if last_outputs is None:
             continue
 
-        preds_batch = last_outputs["logits"].argmax(-1).cpu().numpy()
-        q_logits = last_outputs.get("q_halt_logits", torch.zeros(preds_batch.shape[0], device=device))
-        q_values = q_logits.sigmoid().cpu().numpy().flatten()
+        # Extract predictions for the whole large batch
+        preds_batch_all = last_outputs["logits"].argmax(-1).cpu().numpy()
+        q_logits_all = last_outputs.get("q_halt_logits", torch.zeros(preds_batch_all.shape[0], device=device))
+        q_values_all = q_logits_all.sigmoid().cpu().numpy().flatten()
+        inputs_cpu_all = x_puzzle.cpu().numpy()
 
-        inputs_cpu = x_puzzle.cpu().numpy()
+        # 2. De-collate and evaluate each puzzle individually
+        for orig_name, _inverse_fn, slc in puzzle_slices:
+            preds_batch = preds_batch_all[slc]
+            q_values = q_values_all[slc]
+            inputs_cpu = inputs_cpu_all[slc]
 
-        puzzle_preds = {}
-        pred_hash_to_grid = {}
+            puzzle_preds = {}
+            pred_hash_to_grid = {}
 
-        for i in range(preds_batch.shape[0]):
-            pred_seq = preds_batch[i]
-            q_val = float(q_values[i])
+            for i in range(preds_batch.shape[0]):
+                pred_seq = preds_batch[i]
+                q_val = float(q_values[i])
 
-            inp_seq = inputs_cpu[i]
-            input_grid = _inverse_fn(_crop(inp_seq))
-            input_hash = grid_hash(input_grid)
+                inp_seq = inputs_cpu[i]
+                input_grid = _inverse_fn(_crop(inp_seq))
+                input_hash = grid_hash(input_grid)
 
-            pred_grid = _inverse_fn(_crop(pred_seq))
-            pred_hash = grid_hash(pred_grid)
+                pred_grid = _inverse_fn(_crop(pred_seq))
+                pred_hash = grid_hash(pred_grid)
 
-            pred_hash_to_grid[pred_hash] = pred_grid
-            puzzle_preds.setdefault(input_hash, [])
-            puzzle_preds[input_hash].append((pred_hash, q_val))
+                pred_hash_to_grid[pred_hash] = pred_grid
+                puzzle_preds.setdefault(input_hash, [])
+                puzzle_preds[input_hash].append((pred_hash, q_val))
 
-        puzzle = test_puzzles[orig_name]
-        num_test_correct_p1 = 0
-        num_test_correct_p2 = 0
+            puzzle = test_puzzles[orig_name]
+            num_test_correct_p1 = 0
+            num_test_correct_p2 = 0
 
-        for pair in puzzle["test"]:
-            inp_grid = arc_grid_to_np(pair["input"])
-            out_grid = arc_grid_to_np(pair["output"])
+            for pair in puzzle["test"]:
+                inp_grid = arc_grid_to_np(pair["input"])
+                out_grid = arc_grid_to_np(pair["output"])
 
-            input_hash = grid_hash(inp_grid)
-            label_hash = grid_hash(out_grid)
+                input_hash = grid_hash(inp_grid)
+                label_hash = grid_hash(out_grid)
 
-            p_map = {}
-            for h, q in puzzle_preds.get(input_hash, []):
-                p_map.setdefault(h, [0, 0.0])
-                p_map[h][0] += 1
-                p_map[h][1] += q
+                p_map = {}
+                for h, q in puzzle_preds.get(input_hash, []):
+                    p_map.setdefault(h, [0, 0.0])
+                    p_map[h][0] += 1
+                    p_map[h][1] += q
 
-            if not len(p_map):
+                if not len(p_map):
+                    n_cells += out_grid.size
+                    continue
+
+                for h, stats in p_map.items():
+                    stats[1] /= stats[0]
+
+                p_map_sorted = sorted(p_map.items(), key=lambda kv: kv[1], reverse=True)
+
+                top1_hash = p_map_sorted[0][0]
+                if top1_hash == label_hash:
+                    num_test_correct_p1 += 1
+
+                top2_hashes = [kv[0] for kv in p_map_sorted[:2]]
+                if label_hash in top2_hashes:
+                    num_test_correct_p2 += 1
+
+                top_grid = pred_hash_to_grid[top1_hash]
+                if top_grid.shape == out_grid.shape:
+                    cell_hits += (top_grid == out_grid).sum()
                 n_cells += out_grid.size
-                continue
 
-            for h, stats in p_map.items():
-                stats[1] /= stats[0]
+            correct_pass1 += num_test_correct_p1 / len(puzzle["test"])
+            correct_pass2 += num_test_correct_p2 / len(puzzle["test"])
+            evaluated_count += 1
 
-            p_map_sorted = sorted(p_map.items(), key=lambda kv: kv[1], reverse=True)
-
-            top1_hash = p_map_sorted[0][0]
-            if top1_hash == label_hash:
-                num_test_correct_p1 += 1
-
-            top2_hashes = [kv[0] for kv in p_map_sorted[:2]]
-            if label_hash in top2_hashes:
-                num_test_correct_p2 += 1
-
-            top_grid = pred_hash_to_grid[top1_hash]
-            if top_grid.shape == out_grid.shape:
-                cell_hits += (top_grid == out_grid).sum()
-            n_cells += out_grid.size
-
-        correct_pass1 += num_test_correct_p1 / len(puzzle["test"])
-        correct_pass2 += num_test_correct_p2 / len(puzzle["test"])
-        evaluated_count += 1
-
-        current_p1 = correct_pass1 / evaluated_count
+        current_p1 = correct_pass1 / evaluated_count if evaluated_count > 0 else 0.0
         current_cell = cell_hits / n_cells if n_cells > 0 else 0.0
         pbar.set_postfix({"p1": f"{current_p1:.4f}", "cell": f"{current_cell:.4f}"})
 
@@ -327,7 +361,11 @@ def evaluate_arc_per_puzzle(mdl, dataset, device="cpu", n_sup_max=16, max_puzzle
 
 # 5. Run evaluation
 print("Running FP32 baseline evaluation...")
-p1, p2, cell, ms = evaluate_arc_per_puzzle(model, test_ds, device=DEVICE, n_sup_max=16, return_pass2=True)
+# You can increase puzzles_per_batch (e.g. 4, 8, 16, 32) to utilize more GPU VRAM and speed up evaluation!
+PUZZLES_PER_BATCH = 8
+p1, p2, cell, ms = evaluate_arc_per_puzzle(
+    model, test_ds, device=DEVICE, n_sup_max=16, return_pass2=True, puzzles_per_batch=PUZZLES_PER_BATCH
+)
 print("\n[Evaluation Complete]")
 print(f"Pass@1 Exact: {p1*100:.2f}%")
 print(f"Pass@2 Exact: {p2*100:.2f}%")
