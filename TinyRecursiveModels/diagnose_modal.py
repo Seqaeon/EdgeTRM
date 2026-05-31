@@ -16,7 +16,7 @@ sys.path.append(os.getcwd())
 # Ensure correct data dir and devices
 DATA_DIR = "./data1/arc2test-aug-1000"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-CHECKPOINT_PATH = "/home/seqaeon/Downloads/step_14907"
+CHECKPOINT_PATH = "step_723914"
 
 print(f"Device: {DEVICE}")
 print(f"Checkpoint: {CHECKPOINT_PATH}")
