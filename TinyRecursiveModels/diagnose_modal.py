@@ -86,7 +86,7 @@ def load_arc_model(checkpoint_path, config_text):
     final_config = {
         "batch_size": 32,
         "seq_len": 900,
-        "num_puzzle_identifiers": 225972,
+        "num_puzzle_identifiers": 1191730,
         "vocab_size": 12,
         "H_cycles": arch['H_cycles'],
         "L_cycles": arch['L_cycles'],
