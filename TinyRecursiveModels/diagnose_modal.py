@@ -315,8 +315,8 @@ def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches
             local_preds[orig_name].setdefault(input_hash, [])
             local_preds[orig_name][input_hash].append((pred_hash, q_val))
 
-        # Update progress bar set_postfix once every 10 batches to prevent CPU-based metric calculation bottleneck
-        if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == num_batches:
+        # Update progress bar set_postfix on every single batch for immediate visual logging
+        if True:
             run_evaluated = [name for name in test_puzzles.keys() if name in local_preds]
             if len(run_evaluated) > 0:
                 run_correct = [0.0, 0.0]
@@ -365,7 +365,7 @@ def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches
                 run_cell = run_cell_hits / run_n_cells if run_n_cells > 0 else 0.0
                 pbar.set_postfix({"p1": f"{run_p1*100:.2f}%", "cell": f"{run_cell*100:.2f}%"})
                 
-                # Print directly to stdout every 10 batches so it is permanently logged in non-interactive/Modal logs
+                # Print directly to stdout on every single batch so it is permanently logged in Modal logs
                 print(f" -> Batch {batch_idx + 1}/{num_batches} | Running Pass@1: {run_p1*100:.4f}% | Running Cell Acc: {run_cell*100:.4f}%", flush=True)
 
     elapsed = time.time() - t0
