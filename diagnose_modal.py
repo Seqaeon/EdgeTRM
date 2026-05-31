@@ -233,15 +233,26 @@ def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches
 
     t0 = time.time()
     
-    # We wrap the loader with a standard batch loop
-    pbar = tqdm(loader, desc="Evaluating per-puzzle batches", leave=False)
-    for batch_idx, (x_batch, y_true, pids) in enumerate(pbar):
+    # Bypass DataLoader collation completely to eliminate sequential __getitem__ CPU tensor allocation overhead
+    ds = loader.dataset
+    inputs_np = ds.inputs
+    labels_np = ds.labels
+    pids_np = ds.per_sample_pids
+    num_samples = len(inputs_np)
+    batch_size = loader.batch_size if hasattr(loader, "batch_size") else 512
+    num_batches = (num_samples + batch_size - 1) // batch_size
+    
+    pbar = tqdm(range(num_batches), desc="Evaluating per-puzzle batches", leave=False)
+    for batch_idx in pbar:
         if max_batches is not None and batch_idx >= max_batches:
             break
 
-        x_batch = x_batch.to(device)
-        y_true  = y_true.to(device)
-        pids    = pids.to(device)
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + batch_size, num_samples)
+        
+        x_batch = torch.from_numpy(inputs_np[start_idx:end_idx]).to(device, dtype=torch.long)
+        y_true  = torch.from_numpy(labels_np[start_idx:end_idx]).to(device, dtype=torch.long)
+        pids    = torch.from_numpy(pids_np[start_idx:end_idx]).to(device, dtype=torch.long)
 
         batch = {
             "inputs":             x_batch.to(torch.int32),
@@ -274,8 +285,8 @@ def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches
         q_logits    = last_outputs.get("q_halt_logits", torch.zeros(preds_batch.shape[0], device=device))
         q_values    = q_logits.sigmoid().cpu().numpy().flatten()    # (B,)
 
-        inputs_cpu  = x_batch.cpu().numpy()
-        pids_cpu    = pids.cpu().numpy()
+        inputs_cpu  = inputs_np[start_idx:end_idx]
+        pids_cpu    = pids_np[start_idx:end_idx]
 
         for i in range(preds_batch.shape[0]):
             identifier = pids_cpu[i]
@@ -286,8 +297,7 @@ def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches
             pred_seq = preds_batch[i]
             q_val = float(q_values[i])
 
-            bs = loader.batch_size if hasattr(loader, "batch_size") else preds_batch.shape[0]
-            sample_idx = batch_idx * bs + i
+            sample_idx = start_idx + i
             if sample_idx in precomputed_input_info and precomputed_input_info[sample_idx][0] == orig_name:
                 input_hash = precomputed_input_info[sample_idx][1]
             else:
@@ -442,7 +452,7 @@ def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches
 # 5. Run evaluation
 print("Running FP32 baseline evaluation...")
 # Configure DataLoader with highly optimized batch size for GPU
-BATCH_SIZE = 2048
+BATCH_SIZE = 512
 test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False)
 
 p1, p2, cell, ms, npuzz = evaluate_arc_per_puzzle(
