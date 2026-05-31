@@ -149,7 +149,9 @@ def get_inner(m):
 # 3. Load ARC dataset
 print("Loading dataset...")
 test_ds = ARCDataset(f"{DATA_DIR}/test")
-print(f"Test dataset has {len(test_ds)} samples.")@torch.no_grad()
+print(f"Test dataset has {len(test_ds)} samples.")
+
+@torch.no_grad()
 def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches=None, return_pass2=False):
     from models.recursive_reasoning.trm import (
         TinyRecursiveReasoningModel_ACTV1Carry,
@@ -382,7 +384,7 @@ def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches
 # 5. Run evaluation
 print("Running FP32 baseline evaluation...")
 # Configure DataLoader with highly optimized batch size for GPU
-BATCH_SIZE = 512
+BATCH_SIZE = 2048
 test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False)
 
 p1, p2, cell, ms, npuzz = evaluate_arc_per_puzzle(

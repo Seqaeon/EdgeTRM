@@ -149,7 +149,9 @@ def get_inner(m):
 # 3. Load ARC dataset
 print("Loading dataset...")
 test_ds = ARCDataset(f"{DATA_DIR}/test")
-print(f"Test dataset has {len(test_ds)} samples.")@torch.no_grad()
+print(f"Test dataset has {len(test_ds)} samples.")
+
+@torch.no_grad()
 def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches=None, return_pass2=False):
     from models.recursive_reasoning.trm import (
         TinyRecursiveReasoningModel_ACTV1Carry,
