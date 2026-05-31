@@ -161,7 +161,7 @@ from evaluators.arc import _crop
 import json
 
 @torch.no_grad()
-def evaluate_arc_per_puzzle(mdl, dataset, device="cpu", n_sup_max=16, max_puzzles=100, return_pass2=False, puzzles_per_batch=4):
+def evaluate_arc_per_puzzle(mdl, dataset, device="cpu", n_sup_max=16, max_puzzles=None, return_pass2=False, puzzles_per_batch=4):
     inner = get_inner(mdl)
     inner.eval()
     inner = inner.to(device)
