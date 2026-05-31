@@ -452,7 +452,7 @@ def evaluate_arc_per_puzzle(mdl, loader, device="cpu", n_sup_max=16, max_batches
 # 5. Run evaluation
 print("Running FP32 baseline evaluation...")
 # Configure DataLoader with highly optimized batch size for GPU
-BATCH_SIZE = 512
+BATCH_SIZE = 2048
 test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False)
 
 p1, p2, cell, ms, npuzz = evaluate_arc_per_puzzle(
