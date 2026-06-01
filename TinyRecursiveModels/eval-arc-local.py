@@ -241,39 +241,54 @@ def load_checkpoint(model: nn.Module, config: PretrainConfig):
         # Load state dict
         state_dict = torch.load(config.load_checkpoint, map_location="cuda")
 
-        # Strip compiled prefix robustly
-        cleaned_state_dict = {}
-        for k, v in state_dict.items():
-            new_k = k
-            if new_k.startswith("_orig_mod."):
-                new_k = new_k[len("_orig_mod."):]
-            cleaned_state_dict[new_k] = v
+        # Helper to strip prefixes for clean alignment matching
+        def clean_key(key):
+            # Clean off compilation and wrapping prefixes recursively
+            for prefix in ["_orig_mod.", "model."]:
+                if key.startswith(prefix):
+                    key = key[len(prefix):]
+            return key
+
+        # Get target model's raw state_dict and clean version mapping
+        target_keys = list(model.state_dict().keys())
+        target_clean_to_raw = {clean_key(k): k for k in target_keys}
+
+        # Build fully aligned state dict
+        aligned_state_dict = {}
+        for loaded_k, loaded_v in state_dict.items():
+            cleaned_loaded_k = clean_key(loaded_k)
+            if cleaned_loaded_k in target_clean_to_raw:
+                target_k = target_clean_to_raw[cleaned_loaded_k]
+                aligned_state_dict[target_k] = loaded_v
+            else:
+                # Keep original key if not matched for strict diagnostics
+                aligned_state_dict[loaded_k] = loaded_v
 
         # Locate model's puzzle embedding weight key dynamically
         puzzle_emb_key = None
-        for k in model.state_dict().keys():
+        for k in target_keys:
             if "puzzle_emb.weights" in k:
                 puzzle_emb_key = k
                 break
 
         if puzzle_emb_key is not None:
-            # Locate corresponding key in the loaded state_dict
+            # Locate corresponding key in the aligned_state_dict
             loaded_emb_key = None
-            for k in cleaned_state_dict.keys():
+            for k in aligned_state_dict.keys():
                 if "puzzle_emb.weights" in k:
                     loaded_emb_key = k
                     break
 
             if loaded_emb_key is not None:
                 expected_shape = model.state_dict()[puzzle_emb_key].shape
-                loaded_shape = cleaned_state_dict[loaded_emb_key].shape
+                loaded_shape = aligned_state_dict[loaded_emb_key].shape
                 if loaded_shape != expected_shape:
                     print(f"Resizing puzzle embedding weights dynamically from {loaded_shape} to {expected_shape}...")
-                    mean_emb = torch.mean(cleaned_state_dict[loaded_emb_key], dim=0, keepdim=True)
-                    cleaned_state_dict[loaded_emb_key] = mean_emb.expand(expected_shape).contiguous()
+                    mean_emb = torch.mean(aligned_state_dict[loaded_emb_key], dim=0, keepdim=True)
+                    aligned_state_dict[loaded_emb_key] = mean_emb.expand(expected_shape).contiguous()
 
         # Load into the model with non-strict compatibility for seamless robustness
-        missing_keys, unexpected_keys = model.load_state_dict(cleaned_state_dict, strict=False)
+        missing_keys, unexpected_keys = model.load_state_dict(aligned_state_dict, strict=False)
         if len(missing_keys) > 0:
             print(f"Warning: Missing keys during checkpoint load: {missing_keys}")
         if len(unexpected_keys) > 0:
