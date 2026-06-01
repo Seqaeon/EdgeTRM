@@ -84,6 +84,7 @@ class PretrainConfig(pydantic.BaseModel):
     # Extras
     seed: int = 0
     checkpoint_every_eval: bool = False
+    checkpoint_interval: int = 500  # save resume checkpoint every N optimizer steps
     eval_interval: Optional[int] = None
     min_eval_interval: Optional[int] = 0 # when to start eval
     eval_save_outputs: List[str] = []
@@ -268,13 +269,102 @@ def load_checkpoint(model: nn.Module, config: PretrainConfig):
                 new_weights = torch.empty(expected_shape, dtype=puzzle_emb.dtype, device=puzzle_emb.device)
                 mean_emb = torch.mean(puzzle_emb, dim=0)
                 new_weights[:] = mean_emb
-                
+
                 # Copy all overlapping rows to preserve learned weights
                 min_rows = min(puzzle_emb.shape[0], expected_shape[0])
                 new_weights[:min_rows] = puzzle_emb[:min_rows]
                 state_dict[puzzle_emb_name] = new_weights
-                
+
         model.load_state_dict(state_dict, assign=True)
+
+
+def save_resume_checkpoint(
+    config: PretrainConfig,
+    train_state: TrainState,
+    ema_helper: Any,
+    iter_id: int,
+    batch_count: int,
+) -> None:
+    """Atomically saves full resume state to {checkpoint_path}/resume.pt.
+
+    Writes to a .tmp file first and renames atomically so a mid-write crash
+    never leaves a corrupt checkpoint.  Call from rank 0 only.
+    """
+    if config.checkpoint_path is None:
+        return
+    os.makedirs(config.checkpoint_path, exist_ok=True)
+    path = os.path.join(config.checkpoint_path, "resume.pt")
+    tmp_path = path + ".tmp"
+
+    payload: dict = {
+        "model_state_dict": train_state.model.state_dict(),
+        "optimizer_states": [opt.state_dict() for opt in train_state.optimizers],
+        "step": train_state.step,
+        "iter_id": iter_id,
+        "batch_count": batch_count,
+        # _iters equals iter_id at the start of the outer iteration; restore
+        # this so the dataset RNG seed reproduces the same batch ordering.
+        "dataset_iters": iter_id,
+    }
+    if ema_helper is not None:
+        payload["ema_state"] = ema_helper.state_dict()
+
+    torch.save(payload, tmp_path)
+    os.replace(tmp_path, path)  # atomic on POSIX, best-effort on Windows
+
+
+def load_resume_checkpoint(
+    config: PretrainConfig,
+    train_state: TrainState,
+    ema_helper: Any,
+    rank: int,
+    world_size: int,
+) -> Tuple[int, int, int]:
+    """Restores resume state on rank 0 then syncs model weights to all ranks.
+
+    Returns ``(start_iter_id, skip_batches, dataset_iters)``.  Returns
+    ``(0, 0, 0)`` when no resume checkpoint exists (fresh run).
+
+    Optimizer states and EMA shadow weights are only restored on rank 0.
+    Other ranks start with default optimizer state; because gradients are
+    all-reduced before every optimizer step the momentums converge within
+    a few steps.
+    """
+    resume_path = (
+        os.path.join(config.checkpoint_path, "resume.pt")
+        if config.checkpoint_path is not None
+        else None
+    )
+    info = [0, 0, 0]  # [start_iter_id, skip_batches, dataset_iters]
+
+    if rank == 0 and resume_path is not None and os.path.exists(resume_path):
+        print(f"Resuming from checkpoint: {resume_path}")
+        payload = torch.load(resume_path, map_location="cuda")
+
+        train_state.model.load_state_dict(payload["model_state_dict"], assign=True)
+        for opt, sd in zip(train_state.optimizers, payload["optimizer_states"]):
+            opt.load_state_dict(sd)
+        train_state.step = payload["step"]
+
+        if ema_helper is not None and "ema_state" in payload:
+            ema_helper.load_state_dict(payload["ema_state"])
+
+        info = [payload["iter_id"], payload["batch_count"], payload["dataset_iters"]]
+        print(f"  Resumed: step={train_state.step}, outer_iter={info[0]}, skip_batches={info[1]}")
+
+    if world_size > 1:
+        # Sync model weights and buffers from rank 0 to all ranks
+        with torch.no_grad():
+            for p in list(train_state.model.parameters()) + list(train_state.model.buffers()):
+                dist.broadcast(p, src=0)
+
+        # Sync scalar resume info (step, iter_id, batch_count, dataset_iters)
+        dist.broadcast_object_list(info, src=0)
+        step_t = torch.tensor([train_state.step], dtype=torch.int64).cuda()
+        dist.broadcast(step_t, src=0)
+        train_state.step = int(step_t.item())
+
+    return info[0], info[1], info[2]
 
 
 def compute_lr(base_lr: float, config: PretrainConfig, train_state: TrainState):
@@ -597,28 +687,47 @@ def launch(hydra_config: DictConfig):
     # Train state
     train_state = init_train_state(config, train_metadata, rank=RANK, world_size=WORLD_SIZE)
 
-    # Progress bar and logger
-    progress_bar = None
+    # EMA setup before resume load so shadow weights are registered before being restored
     ema_helper = None
-    if RANK == 0:
-        progress_bar = tqdm.tqdm(total=train_state.total_steps)
-        wandb.init(project=config.project_name, name=config.run_name, config=config.model_dump(), settings=wandb.Settings(_disable_stats=True))  # type: ignore
-        wandb.log({"num_params": sum(x.numel() for x in train_state.model.parameters())}, step=0)
-        save_code_and_config(config)
     if config.ema:
         print('Setup EMA')
         ema_helper = EMAHelper(mu=config.ema_rate)
         ema_helper.register(train_state.model)
 
+    # Resume checkpoint — restores model weights, optimizer states, EMA, step, and
+    # iter position.  Returns (0, 0, 0) on a fresh run.
+    start_iter_id, skip_batches, dataset_iters = load_resume_checkpoint(
+        config, train_state, ema_helper, rank=RANK, world_size=WORLD_SIZE
+    )
+    # Restore the dataset RNG counter so the resumed iteration uses the same
+    # batch ordering as the original run.  Must be set before the DataLoader
+    # worker is first spawned (i.e. before the training loop begins).
+    train_loader.dataset._iters = dataset_iters
+
+    # Progress bar and logger
+    progress_bar = None
+    if RANK == 0:
+        progress_bar = tqdm.tqdm(total=train_state.total_steps, initial=train_state.step)
+        wandb.init(project=config.project_name, name=config.run_name, config=config.model_dump(), settings=wandb.Settings(_disable_stats=True))  # type: ignore
+        wandb.log({"num_params": sum(x.numel() for x in train_state.model.parameters())}, step=train_state.step)
+        save_code_and_config(config)
+
     # Training Loop
-    for _iter_id in range(total_iters):
-        print (f"[Rank {RANK}, World Size {WORLD_SIZE}]: Epoch {_iter_id * train_epochs_per_iter}")
+    for _iter_id in range(start_iter_id, total_iters):
+        print(f"[Rank {RANK}, World Size {WORLD_SIZE}]: Epoch {_iter_id * train_epochs_per_iter}")
 
         ############ Train Iter
         if RANK == 0:
             print("TRAIN")
         train_state.model.train()
+        batch_count = 0
         for set_name, batch, global_batch_size in train_loader:
+            # Fast-forward through already-processed batches in the resumed iteration
+            if _iter_id == start_iter_id and batch_count < skip_batches:
+                batch_count += 1
+                continue
+
+            batch_count += 1
             metrics = train_batch(config, train_state, batch, global_batch_size, rank=RANK, world_size=WORLD_SIZE)
 
             if RANK == 0 and metrics is not None:
@@ -626,6 +735,10 @@ def launch(hydra_config: DictConfig):
                 progress_bar.update(train_state.step - progress_bar.n)  # type: ignore
             if config.ema:
                 ema_helper.update(train_state.model)
+
+            # Periodic resume checkpoint — atomic write, rank 0 only
+            if RANK == 0 and train_state.step % config.checkpoint_interval == 0:
+                save_resume_checkpoint(config, train_state, ema_helper, _iter_id, batch_count)
 
         if _iter_id >= config.min_eval_interval:
             ############ Evaluation
@@ -638,18 +751,18 @@ def launch(hydra_config: DictConfig):
             else:
                 train_state_eval = train_state
             train_state_eval.model.eval()
-            metrics = evaluate(config, 
-                train_state_eval, 
-                eval_loader, 
-                eval_metadata, 
+            metrics = evaluate(config,
+                train_state_eval,
+                eval_loader,
+                eval_metadata,
                 evaluators,
-                rank=RANK, 
+                rank=RANK,
                 world_size=WORLD_SIZE,
                 cpu_group=CPU_PROCESS_GROUP)
 
             if RANK == 0 and metrics is not None:
                 wandb.log(metrics, step=train_state.step)
-                
+
             ############ Checkpointing
             if RANK == 0:
                 print("SAVE CHECKPOINT")
