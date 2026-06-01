@@ -31,6 +31,11 @@ class CastedSparseEmbedding(nn.Module):
             return self.weights[inputs].to(self.cast_to)
             
         # Training mode, fill puzzle embedding from weights
+        B = inputs.shape[0]
+        if self.local_weights.shape[0] != B:
+            # Bypass fixed-size local buffer to support dynamic batch sizes (e.g. during QAT fine-tuning)
+            return self.weights[inputs].to(self.cast_to)
+
         with torch.no_grad():
             self.local_weights.copy_(self.weights[inputs])
             self.local_ids.copy_(inputs)
