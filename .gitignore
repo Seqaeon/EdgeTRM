@@ -21,3 +21,6 @@ __pycache__/
 # Ignore OS-specific files
 .DS_Store
 Thumbs.db
+
+# Ignore sensitive credentials
+EdgeTRM.pem
