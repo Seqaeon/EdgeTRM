@@ -1,0 +1,23 @@
+# Ignore built datasets and datasets directories
+data/
+data1/
+
+# Ignore virtual environments
+.venv/
+.venv_ppt/
+venv/
+env/
+
+# Ignore python bytecode and cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Ignore Jupyter Notebook checkpoint directories
+.ipynb_checkpoints/
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
