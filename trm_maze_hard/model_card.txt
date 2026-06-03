@@ -1,0 +1,4 @@
+{
+  "checkpoint_file": "step_390620",
+  "checkpoint_path": "checkpoints/Maze-30x30-hard-1k-ACT-torch/pretrain_att_maze30x30_1gpu/step_390620"
+}
