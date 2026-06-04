@@ -1,6 +1,7 @@
 # Ignore built datasets and datasets directories
 data/
 data1/
+trm_maze_hard/
 
 # Ignore virtual environments
 .venv/
