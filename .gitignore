@@ -4,6 +4,7 @@ data1/
 trm_maze_hard/
 trm_sudoku_extreme/
 
+
 # Ignore virtual environments
 .venv/
 .venv_ppt/
