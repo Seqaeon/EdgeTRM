@@ -1,5 +1,8 @@
 # Ignore built datasets and datasets directories
-# data/
+
+data/
+**/data/**
+[Dd]ata/
 data1/
 trm_maze_hard/
 trm_sudoku_extreme/
