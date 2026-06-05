@@ -6,7 +6,7 @@
 ---
 
 ## 1. What is the question you want to answer?
-Can recursive neural architectures maintain high-level abstract reasoning capabilities (specifically on the ARC and Sudoku benchmarks) when subjected to extreme model compression for deployment on <1MB SRAM embedded devices? Furthermore, does recursive depth provide a more "energy-efficient" path to AGI-like reasoning than standard feed-forward scaling in TinyML environments?
+Can recursive neural architectures maintain high-level abstract reasoning capabilities (specifically on the ARC and Sudoku benchmarks) when subjected to extreme model compression for deployment on <1MB or <4MB or <8MB SRAM embedded devices? Furthermore, does recursive depth provide a more "energy-efficient" path to AGI-like reasoning than standard feed-forward scaling in TinyML environments?
 
 ---
 

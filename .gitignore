@@ -3,7 +3,7 @@ data/
 data1/
 trm_maze_hard/
 trm_sudoku_extreme/
-
+eval_checkpoint/
 
 # Ignore virtual environments
 .venv/
