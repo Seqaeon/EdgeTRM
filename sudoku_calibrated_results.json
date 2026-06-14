@@ -1,0 +1,29 @@
+{
+  "N": 256,
+  "rows": [
+    {
+      "variant": "FP32",
+      "pexact": 0.73828125,
+      "cell": 0.8884548611111112,
+      "fidelity_final": 1.0
+    },
+    {
+      "variant": "INT8",
+      "pexact": 0.73046875,
+      "cell": 0.8865258487654321,
+      "fidelity_final": 0.9983676075935364
+    },
+    {
+      "variant": "INT4-naive",
+      "pexact": 0.1015625,
+      "cell": 0.6776620370370371,
+      "fidelity_final": 0.352914959192276
+    },
+    {
+      "variant": "INT4-calibrated",
+      "pexact": 0.71875,
+      "cell": 0.8816068672839507,
+      "fidelity_final": 0.8943012952804565
+    }
+  ]
+}
