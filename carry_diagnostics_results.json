@@ -1,0 +1,66 @@
+{
+  "Sudoku": {
+    "FP32": {
+      "consec_mean": 0.8056886732578278,
+      "consec_final": 0.6200516819953918,
+      "rough": 0.14941518754519242,
+      "norm_ratio": 1.000003034149872,
+      "final_vs_init": 0.15717600286006927,
+      "fidelity_mean": 1.0,
+      "fidelity_final": 1.0,
+      "fidelity_min": 1.0
+    },
+    "INT8": {
+      "consec_mean": 0.8058064639568329,
+      "consec_final": 0.620901346206665,
+      "rough": 0.14938633765842488,
+      "norm_ratio": 1.000003034149872,
+      "final_vs_init": 0.1570783406496048,
+      "fidelity_mean": 0.9993881838662284,
+      "fidelity_final": 0.9983676075935364,
+      "fidelity_min": 0.9983676075935364
+    },
+    "INT4": {
+      "consec_mean": 0.8414111405611038,
+      "consec_final": 0.7819197177886963,
+      "rough": 0.13336568024721188,
+      "norm_ratio": 1.0000014325599882,
+      "final_vs_init": 0.19031493365764618,
+      "fidelity_mean": 0.5194971334366572,
+      "fidelity_final": 0.352914959192276,
+      "fidelity_min": 0.352914959192276
+    }
+  },
+  "Maze": {
+    "FP32": {
+      "consec_mean": 0.696726756170392,
+      "consec_final": 0.013521946966648102,
+      "rough": 0.3418702960359975,
+      "norm_ratio": 1.0000024440860258,
+      "final_vs_init": 0.07234826683998108,
+      "fidelity_mean": 1.0,
+      "fidelity_final": 1.0,
+      "fidelity_min": 1.0
+    },
+    "INT8": {
+      "consec_mean": 0.6967239542199033,
+      "consec_final": 0.013533435761928558,
+      "rough": 0.34189059565695096,
+      "norm_ratio": 1.0000024440860258,
+      "final_vs_init": 0.07238183170557022,
+      "fidelity_mean": 0.9999949336051941,
+      "fidelity_final": 0.9999924898147583,
+      "fidelity_min": 0.9999924898147583
+    },
+    "INT4": {
+      "consec_mean": 0.6984848903625139,
+      "consec_final": 0.011848102323710918,
+      "rough": 0.34166818138313493,
+      "norm_ratio": 1.0000024440860258,
+      "final_vs_init": 0.08033585548400879,
+      "fidelity_mean": 0.9901110291481018,
+      "fidelity_final": 0.9890768527984619,
+      "fidelity_min": 0.9860962629318237
+    }
+  }
+}
